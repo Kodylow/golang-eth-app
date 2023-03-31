@@ -2,16 +2,18 @@ package main
 
 import (
 	"context"
+	"io/ioutil"
 	"log"
 	"math/big"
+	"os"
 
+	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/joho/godotenv"
 )
-
-var infuraURL = "https://mainnet.infura.io/v3/360031b1b30f4b8b92b6a27850e11b8d"
-var ganacheURL = "http://localhost:8545"
 
 type EthClient interface {
 	BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error)
@@ -24,23 +26,25 @@ func gweiToEth(gwei *big.Int) *big.Float {
 	return eth
 }
 
-func main() {
+func generateAccount(password string) (accounts.Account, error) {
+	key := keystore.NewKeyStore("./keystore", keystore.StandardScryptN, keystore.StandardScryptP)
 
-	// Connect to a node
-	ethClient, err := ethclient.DialContext(context.Background(), ganacheURL)
+	account, err := key.NewAccount(password)
 	if err != nil {
-		log.Fatalf("Failed to connect to the Ethereum client: %v", err)
+		log.Fatalf("Failed to create account: %v", err)
+		return accounts.Account{}, err
 	}
-	defer ethClient.Close()
+	return account, nil
 
-	// Get the latest block
+}
+
+func check(ethClient *ethclient.Client) {
 	block, err := ethClient.BlockByNumber(context.Background(), nil)
 	if err != nil {
 		log.Fatalf("Failed to get the latest block: %v", err)
 	}
 	log.Printf("Latest block: %d", block.NumberU64())
 
-	// Get the balance of an address
 	addr := "0x0cd6f40fBceb4947749603cC069ed16D07FC548b"
 	address := common.HexToAddress(addr)
 	gweiBalance, err := ethClient.BalanceAt(context.Background(), address, nil)
@@ -49,8 +53,51 @@ func main() {
 	}
 	log.Printf("Balance Gwei: %d", gweiBalance)
 
-	// Convert to ETH
 	ethBalance := gweiToEth(gweiBalance)
 	log.Printf("Balance ETH: %f", ethBalance)
+}
 
+func main() {
+
+	// Read in .env and set environment variables
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatalf("Error loading .env file")
+	}
+	keystorePath := os.Getenv("KEYSTORE_PATH")
+	password := os.Getenv("PASSWORD")
+	infuraURL := os.Getenv("INFURA_URL")
+	// ganacheURL := "http://localhost:8545"
+
+	// Connect to a node
+	ethClient, err := ethclient.DialContext(context.Background(), infuraURL)
+	if err != nil {
+		log.Fatalf("Failed to connect to the Ethereum client: %v", err)
+	}
+	defer ethClient.Close()
+
+	// Load keystore
+	b, err := ioutil.ReadFile(keystorePath)
+	if err != nil {
+		log.Fatalf("Failed to read keystore: %v", err)
+	}
+
+	// Decrypt keystore
+	key, err := keystore.DecryptKey(b, password)
+	if err != nil {
+		log.Fatalf("Failed to decrypt keystore: %v", err)
+	}
+
+	// Get account
+	account := accounts.Account{
+		Address: key.Address,
+	}
+
+	// Get balance
+	balance, err := ethClient.BalanceAt(context.Background(), account.Address, nil)
+	if err != nil {
+		log.Fatalf("Failed to get balance: %v", err)
+	}
+
+	log.Printf("Balance Gwei: %d", balance)
 }
