@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"io/ioutil"
 	"log"
 	"math/big"
 	"os"
@@ -11,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/joho/godotenv"
 )
@@ -64,40 +64,77 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error loading .env file")
 	}
-	keystorePath := os.Getenv("KEYSTORE_PATH")
-	password := os.Getenv("PASSWORD")
-	infuraURL := os.Getenv("INFURA_URL")
-	// ganacheURL := "http://localhost:8545"
+	// keystorePath := os.Getenv("KEYSTORE_PATH")
+	// password := os.Getenv("PASSWORD")
+	// infuraURL := os.Getenv("INFURA_URL")
+	ganacheURL := "http://localhost:8545"
 
 	// Connect to a node
-	ethClient, err := ethclient.DialContext(context.Background(), infuraURL)
+	ethClient, err := ethclient.DialContext(context.Background(), ganacheURL)
 	if err != nil {
 		log.Fatalf("Failed to connect to the Ethereum client: %v", err)
 	}
 	defer ethClient.Close()
 
-	// Load keystore
-	b, err := ioutil.ReadFile(keystorePath)
+	pk1Bytes := common.FromHex(os.Getenv("PRIVKEY1HEX"))
+	pk2Bytes := common.FromHex(os.Getenv("PRIVKEY2HEX"))
+	pk1, err := crypto.ToECDSA(pk1Bytes)
 	if err != nil {
-		log.Fatalf("Failed to read keystore: %v", err)
+		log.Fatalf("Failed to convert private key 1: %v", err)
 	}
-
-	// Decrypt keystore
-	key, err := keystore.DecryptKey(b, password)
+	pk2, err := crypto.ToECDSA(pk2Bytes)
 	if err != nil {
-		log.Fatalf("Failed to decrypt keystore: %v", err)
+		log.Fatalf("Failed to convert private key 2: %v", err)
 	}
 
-	// Get account
-	account := accounts.Account{
-		Address: key.Address,
-	}
+	a1 := crypto.PubkeyToAddress(pk1.PublicKey)
+	a2 := crypto.PubkeyToAddress(pk2.PublicKey)
 
-	// Get balance
-	balance, err := ethClient.BalanceAt(context.Background(), account.Address, nil)
+	log.Printf("Address 1: %s", a1.Hex())
+	log.Printf("Address 2: %s", a2.Hex())
+
+	// Check Balances
+	a1Balance, err := ethClient.BalanceAt(context.Background(), a1, nil)
 	if err != nil {
-		log.Fatalf("Failed to get balance: %v", err)
+		log.Fatalf("Failed to get balance for addr1: %v", err)
+	}
+	a2Balance, err := ethClient.BalanceAt(context.Background(), a2, nil)
+	if err != nil {
+		log.Fatalf("Failed to get balance for addr2: %v", err)
 	}
 
-	log.Printf("Balance Gwei: %d", balance)
+	log.Printf("Balance 1: %d", a1Balance)
+	log.Printf("Balance 2: %d", a2Balance)
+
+	// Create nonce
+	nonce, err := ethClient.PendingNonceAt(context.Background(), a1)
+	if err != nil {
+		log.Fatalf("Failed to get nonce: %v", err)
+	}
+
+	// Create transaction spending to a2
+	tx := types.NewTransaction(nonce, a2, big.NewInt(1000000000000000000), 21000, big.NewInt(1000000000), nil)
+
+	// Sign transaction from a1
+	signedTx, err := types.SignTx(tx, types.HomesteadSigner{}, pk1)
+
+	// Send transaction
+	err = ethClient.SendTransaction(context.Background(), signedTx)
+	if err != nil {
+		log.Fatalf("Failed to send transaction: %v", err)
+	}
+
+	// Check Balances
+	a1Balance, err = ethClient.BalanceAt(context.Background(), a1, nil)
+	if err != nil {
+		log.Fatalf("Failed to get balance for addr1: %v", err)
+	}
+
+	a2Balance, err = ethClient.BalanceAt(context.Background(), a2, nil)
+	if err != nil {
+		log.Fatalf("Failed to get balance for addr2: %v", err)
+	}
+
+	log.Printf("Balance 1 after tx: %d", a1Balance)
+	log.Printf("Balance 2 after tx: %d", a2Balance)
 }
