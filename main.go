@@ -6,14 +6,22 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 var infuraURL = "https://mainnet.infura.io/v3/360031b1b30f4b8b92b6a27850e11b8d"
 var ganacheURL = "http://localhost:8545"
 
-func gweiToEth(balance *big.Int) *big.Float {
-	return new(big.Float).Quo(new(big.Float).SetInt(balance), big.NewFloat(1000000000000000000))
+type EthClient interface {
+	BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error)
+	BalanceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (*big.Int, error)
+}
+
+func gweiToEth(gwei *big.Int) *big.Float {
+	eth := new(big.Float).SetInt(gwei)
+	eth = eth.Quo(eth, big.NewFloat(1e9))
+	return eth
 }
 
 func main() {
